@@ -64,6 +64,9 @@
       <div class="indicator-toolbar"><span>INDICATORS</span><label><input type="checkbox" data-indicator="ema20"> EMA 20</label><label><input type="checkbox" data-indicator="ema50"> EMA 50</label><label><input type="checkbox" data-indicator="ema200"> EMA 200</label><label><input type="checkbox" data-indicator="bb"> Bollinger Bands</label><label><input type="checkbox" data-indicator="vwap"> VWAP</label></div>
       <div class="subchart-grid"><div class="subchart-panel"><div class="panel-heading">RSI (14) <span id="rsi-value">--</span></div><div id="rsi-chart" class="sub-chart"></div></div><div class="subchart-panel"><div class="panel-heading">MACD (12, 26, 9)</div><div id="macd-chart" class="sub-chart"></div></div></div>
       <div class="chart-crosshair-info" id="crosshair-info">Move your cursor over the chart to inspect candle data.</div>
+      <div id="mainChart"></div>
+      <div id="rsiChart"></div>
+      <div id="macdChart"></div>
     </section>
 
     <section class="section-block" id="signals">
@@ -105,5 +108,6 @@
 <script src="js/components/signal-panel.js"></script>
 <script src="js/components/market-overview.js"></script>
 <script src="js/app.js"></script>
+<script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
 </body>
 </html>
