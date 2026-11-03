@@ -1,717 +1,386 @@
 /* =========================================================
    CRYPTO INTELLIGENCE TERMINAL
-   PORTFOLIO MANAGEMENT
+   PORTFOLIO MANAGER
    File: js/portfolio.js
 ========================================================= */
 
 'use strict';
 
-/* ---------------------------------------------------------
-   CONFIGURATION
---------------------------------------------------------- */
+const CryptoPortfolio = {
 
-const PORTFOLIO_CONFIG = {
-  storageKey: 'crypto_intelligence_portfolio',
-
-  maximumHoldings: 200,
-
-  currency: 'USD'
-};
-
-/* ---------------------------------------------------------
-   PORTFOLIO STATE
---------------------------------------------------------- */
-
-const Portfolio = {
   holdings: [],
-
-  initialized: false
-};
-
-/* ---------------------------------------------------------
-   HELPERS
---------------------------------------------------------- */
-
-function portfolioElement(id) {
-  return document.getElementById(id);
-}
-
-function portfolioCurrency(value) {
-  if (!Number.isFinite(Number(value))) return '--';
-
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: PORTFOLIO_CONFIG.currency,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function portfolioNumber(value) {
-  return Number.isFinite(Number(value))
-    ? Number(value)
-    : 0;
-}
-
-function portfolioEscape(value) {
-  return String(value ?? '').replace(
-    /[&<>"']/g,
-    character => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    })[character]
-  );
-}
-
-/* ---------------------------------------------------------
-   STORAGE
---------------------------------------------------------- */
-
-function savePortfolio() {
-  try {
-    localStorage.setItem(
-      PORTFOLIO_CONFIG.storageKey,
-      JSON.stringify(Portfolio.holdings)
-    );
-
-    return true;
-
-  } catch (error) {
-    console.error('Portfolio save failed:', error);
-
-    return false;
-  }
-}
-
-function loadPortfolio() {
-  try {
-    const saved = localStorage.getItem(
-      PORTFOLIO_CONFIG.storageKey
-    );
-
-    Portfolio.holdings = saved
-      ? JSON.parse(saved)
-      : [];
-
-    if (!Array.isArray(Portfolio.holdings)) {
-      Portfolio.holdings = [];
-    }
-
-    return Portfolio.holdings;
-
-  } catch (error) {
-    console.error('Portfolio loading failed:', error);
-
-    Portfolio.holdings = [];
-
-    return [];
-  }
-}
-
-/* ---------------------------------------------------------
-   MARKET DATA
---------------------------------------------------------- */
-
-function getPortfolioMarketCoins() {
-  if (
-    window.CryptoDashboard &&
-    window.CryptoDashboard.coins
-  ) {
-    return window.CryptoDashboard.coins;
-  }
-
-  return [];
-}
-
-function getPortfolioMarketPrice(symbol) {
-  const coin = getPortfolioMarketCoins().find(
-    item => item.symbol === symbol
-  );
-
-  return coin
-    ? portfolioNumber(coin.price)
-    : null;
-}
-
-/* ---------------------------------------------------------
-   ADD HOLDING
---------------------------------------------------------- */
-
-function addPortfolioHolding(
-  symbol,
-  quantity,
-  purchasePrice
-) {
-  symbol = String(symbol || '').trim().toUpperCase();
-
-  quantity = Number(quantity);
-
-  purchasePrice = Number(purchasePrice);
-
-  if (!symbol) {
-    alert('Please enter a cryptocurrency symbol.');
-    return false;
-  }
-
-  if (
-    !Number.isFinite(quantity) ||
-    quantity <= 0
-  ) {
-    alert('Enter a valid quantity.');
-    return false;
-  }
-
-  if (
-    !Number.isFinite(purchasePrice) ||
-    purchasePrice <= 0
-  ) {
-    alert('Enter a valid purchase price.');
-    return false;
-  }
-
-  if (
-    Portfolio.holdings.length >=
-    PORTFOLIO_CONFIG.maximumHoldings
-  ) {
-    alert('Maximum portfolio entries reached.');
-    return false;
-  }
-
-  const holding = {
-    id: crypto.randomUUID(),
-
-    symbol,
-
-    quantity,
-
-    purchasePrice,
-
-    purchaseDate: new Date().toISOString(),
-
-    addedAt: Date.now()
-  };
-
-  Portfolio.holdings.push(holding);
-
-  savePortfolio();
-
-  renderPortfolio();
-
-  return true;
-}
-
-/* ---------------------------------------------------------
-   REMOVE HOLDING
---------------------------------------------------------- */
-
-function removePortfolioHolding(id) {
-  Portfolio.holdings = Portfolio.holdings.filter(
-    holding => holding.id !== id
-  );
-
-  savePortfolio();
-
-  renderPortfolio();
-}
-
-/* ---------------------------------------------------------
-   CALCULATE HOLDING VALUE
---------------------------------------------------------- */
-
-function calculateHolding(holding) {
-  const quantity = portfolioNumber(holding.quantity);
-
-  const purchasePrice =
-    portfolioNumber(holding.purchasePrice);
-
-  const currentPrice =
-    getPortfolioMarketPrice(holding.symbol);
-
-  const invested = quantity * purchasePrice;
-
-  const currentValue = currentPrice === null
-    ? null
-    : quantity * currentPrice;
-
-  const profitLoss = currentValue === null
-    ? null
-    : currentValue - invested;
-
-  const percentage = currentValue === null || invested === 0
-    ? null
-    : (profitLoss / invested) * 100;
-
-  return {
-    ...holding,
-
-    currentPrice,
-
-    invested,
-
-    currentValue,
-
-    profitLoss,
-
-    percentage
-  };
-}
-
-/* ---------------------------------------------------------
-   CALCULATE PORTFOLIO TOTALS
---------------------------------------------------------- */
-
-function calculatePortfolioTotals() {
-  const holdings = Portfolio.holdings.map(
-    calculateHolding
-  );
-
-  const invested = holdings.reduce(
-    (sum, item) => sum + item.invested,
-    0
-  );
-
-  const currentValue = holdings.reduce(
-    (sum, item) =>
-      sum + (item.currentValue ?? 0),
-    0
-  );
-
-  const knownValue = holdings.reduce(
-    (sum, item) =>
-      sum + (item.currentValue === null ? 0 : item.currentValue),
-    0
-  );
-
-  const profitLoss = currentValue - invested;
-
-  const percentage = invested > 0
-    ? (profitLoss / invested) * 100
-    : 0;
-
-  const unpricedHoldings = holdings.filter(
-    item => item.currentValue === null
-  ).length;
-
-  return {
-    holdings,
-
-    invested,
-
-    currentValue,
-
-    knownValue,
-
-    profitLoss,
-
-    percentage,
-
-    unpricedHoldings,
-
-    complete: unpricedHoldings === 0
-  };
-}
-
-/* ---------------------------------------------------------
-   ASSET ALLOCATION
---------------------------------------------------------- */
-
-function calculateAssetAllocation() {
-  const totals = calculatePortfolioTotals();
-
-  const grouped = {};
-
-  totals.holdings.forEach(holding => {
-    if (holding.currentValue === null) return;
-
-    grouped[holding.symbol] =
-      (grouped[holding.symbol] || 0) +
-      holding.currentValue;
-  });
-
-  return Object.entries(grouped).map(
-    ([symbol, value]) => ({
-      symbol,
-
-      value,
-
-      percentage: totals.knownValue > 0
-        ? (value / totals.knownValue) * 100
-        : 0
-    })
-  ).sort((a, b) => b.value - a.value);
-}
-
-/* ---------------------------------------------------------
-   RENDER PORTFOLIO SUMMARY
---------------------------------------------------------- */
-
-function renderPortfolioSummary(totals) {
-  const invested = portfolioElement('portfolioInvested');
-
-  const value = portfolioElement('portfolioValue');
-
-  const pnl = portfolioElement('portfolioPnL');
-
-  const percentage = portfolioElement('portfolioReturn');
-
-  if (invested) {
-    invested.textContent = portfolioCurrency(
-      totals.invested
-    );
-  }
-
-  if (value) {
-    value.textContent = portfolioCurrency(
-      totals.knownValue
-    );
-  }
-
-  if (pnl) {
-    pnl.textContent = totals.unpricedHoldings
-      ? portfolioCurrency(totals.profitLoss) + ' (partial)'
-      : portfolioCurrency(totals.profitLoss);
-
-    pnl.className =
-      totals.profitLoss >= 0
-        ? 'positive'
-        : 'negative';
-  }
-
-  if (percentage) {
-    percentage.textContent =
-      totals.percentage.toFixed(2) + '%';
-
-    percentage.className =
-      totals.percentage >= 0
-        ? 'positive'
-        : 'negative';
-  }
-
-  const warning = portfolioElement(
-    'portfolioWarning'
-  );
-
-  if (warning) {
-    warning.textContent =
-      totals.unpricedHoldings > 0
-        ? 'Some holdings do not have current market prices. Portfolio valuation is incomplete.'
-        : '';
-  }
-}
-
-/* ---------------------------------------------------------
-   RENDER HOLDINGS TABLE
---------------------------------------------------------- */
-
-function renderPortfolioTable(totals) {
-  const container = portfolioElement('portfolioTable');
-
-  if (!container) return;
-
-  if (!totals.holdings.length) {
-    container.innerHTML =
-      '<p class="empty-portfolio">No holdings added yet.</p>';
-
-    return;
-  }
-
-  container.innerHTML = totals.holdings.map(
-    holding => {
-      const positive =
-        holding.profitLoss !== null &&
-        holding.profitLoss >= 0;
-
-      return `
-        <tr>
-          <td>
-            <strong>${portfolioEscape(holding.symbol)}</strong>
-          </td>
-
-          <td>
-            ${holding.quantity}
-          </td>
-
-          <td>
-            ${portfolioCurrency(holding.purchasePrice)}
-          </td>
-
-          <td>
-            ${holding.currentPrice === null
-              ? '--'
-              : portfolioCurrency(holding.currentPrice)}
-          </td>
-
-          <td>
-            ${portfolioCurrency(holding.invested)}
-          </td>
-
-          <td>
-            ${holding.currentValue === null
-              ? '--'
-              : portfolioCurrency(holding.currentValue)}
-          </td>
-
-          <td class="${positive ? 'positive' : 'negative'}">
-            ${holding.profitLoss === null
-              ? '--'
-              : portfolioCurrency(holding.profitLoss)}
-          </td>
-
-          <td class="${positive ? 'positive' : 'negative'}">
-            ${holding.percentage === null
-              ? '--'
-              : holding.percentage.toFixed(2) + '%'}
-          </td>
-
-          <td>
-            <button
-              type="button"
-              data-remove-holding="${portfolioEscape(holding.id)}"
-              aria-label="Remove holding"
-            >
-              Remove
-            </button>
-          </td>
-        </tr>
-      `;
-    }
-  ).join('');
-
-  container.querySelectorAll(
-    '[data-remove-holding]'
-  ).forEach(button => {
-    button.addEventListener('click', () => {
-      removePortfolioHolding(
-        button.dataset.removeHolding
-      );
-    });
-  });
-}
-
-/* ---------------------------------------------------------
-   RENDER ASSET ALLOCATION
---------------------------------------------------------- */
-
-function renderAssetAllocation() {
-  const container = portfolioElement(
-    'portfolioAllocation'
-  );
-
-  if (!container) return;
-
-  const allocation = calculateAssetAllocation();
-
-  if (!allocation.length) {
-    container.innerHTML =
-      '<p>No allocation data available.</p>';
-
-    return;
-  }
-
-  container.innerHTML = allocation.map(item => `
-    <div class="allocation-item">
-
-      <div class="allocation-label">
-        <strong>${portfolioEscape(item.symbol)}</strong>
-
-        <span>
-          ${item.percentage.toFixed(2)}%
-        </span>
-      </div>
-
-      <div class="allocation-track">
-        <div
-          class="allocation-fill"
-          style="width:${Math.min(item.percentage, 100)}%"
-        ></div>
-      </div>
-
-      <small>
-        ${portfolioCurrency(item.value)}
-      </small>
-
-    </div>
-  `).join('');
-}
-
-/* ---------------------------------------------------------
-   RENDER EVERYTHING
---------------------------------------------------------- */
-
-function renderPortfolio() {
-  const totals = calculatePortfolioTotals();
-
-  renderPortfolioSummary(totals);
-
-  renderPortfolioTable(totals);
-
-  renderAssetAllocation();
-
-  return totals;
-}
-
-/* ---------------------------------------------------------
-   FORM INITIALIZATION
---------------------------------------------------------- */
-
-function initializePortfolioForm() {
-  const form = portfolioElement('portfolioForm');
-
-  if (!form) return;
-
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-
-    const symbol = portfolioElement(
-      'portfolioSymbol'
-    ).value;
-
-    const quantity = portfolioElement(
-      'portfolioQuantity'
-    ).value;
-
-    const purchasePrice = portfolioElement(
-      'portfolioPurchasePrice'
-    ).value;
-
-    const added = addPortfolioHolding(
-      symbol,
-      quantity,
-      purchasePrice
-    );
-
-    if (added) {
-      form.reset();
-    }
-  });
-}
-
-/* ---------------------------------------------------------
-   EXPORT PORTFOLIO CSV
---------------------------------------------------------- */
-
-function exportPortfolioCSV() {
-  const totals = calculatePortfolioTotals();
-
-  const rows = [
-    [
-      'Symbol',
-      'Quantity',
-      'Purchase Price',
-      'Current Price',
-      'Invested',
-      'Current Value',
-      'Profit Loss',
-      'Return Percentage'
-    ]
-  ];
-
-  totals.holdings.forEach(item => {
-    rows.push([
-      item.symbol,
-      item.quantity,
-      item.purchasePrice,
-      item.currentPrice ?? '',
-      item.invested,
-      item.currentValue ?? '',
-      item.profitLoss ?? '',
-      item.percentage ?? ''
-    ]);
-  });
-
-  const csv = rows.map(row =>
-    row.map(value =>
-      '"' + String(value).replace(/"/g, '""') + '"'
-    ).join(',')
-  ).join('\n');
-
-  const blob = new Blob(
-    [csv],
-    { type: 'text/csv;charset=utf-8;' }
-  );
-
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-
-  link.href = url;
-
-  link.download = 'crypto-portfolio.csv';
-
-  link.click();
-
-  URL.revokeObjectURL(url);
-}
-
-/* ---------------------------------------------------------
-   INITIALIZE
---------------------------------------------------------- */
-
-function initializePortfolio() {
-  if (Portfolio.initialized) return;
-
-  loadPortfolio();
-
-  initializePortfolioForm();
-
-  renderPortfolio();
-
-  Portfolio.initialized = true;
-
-  console.info(
-    'Crypto Intelligence Terminal portfolio initialized.'
-  );
-}
-
-/* ---------------------------------------------------------
-   PUBLIC API
---------------------------------------------------------- */
-
-window.CryptoPortfolio = {
-  initializePortfolio,
-
-  addPortfolioHolding,
-
-  removePortfolioHolding,
-
-  calculateHolding,
-
-  calculatePortfolioTotals,
-
-  calculateAssetAllocation,
-
-  renderPortfolio,
-
-  exportPortfolioCSV,
-
-  getHoldings() {
-    return [...Portfolio.holdings];
+  realizedPnL: 0,
+
+  init() {
+    this.load();
+    return this.getSummary();
   },
 
-  clearPortfolio() {
-    Portfolio.holdings = [];
+  validateNumber(value, name) {
+    const number = Number(value);
 
-    savePortfolio();
+    if (!Number.isFinite(number) || number < 0) {
+      throw new Error(name + ' must be a valid non-negative number.');
+    }
 
-    renderPortfolio();
+    return number;
+  },
+
+  addHolding(data) {
+    if (!data || !data.symbol) {
+      throw new Error('A cryptocurrency symbol is required.');
+    }
+
+    const symbol = String(data.symbol).toUpperCase().trim();
+
+    const quantity = this.validateNumber(
+      data.quantity,
+      'Quantity'
+    );
+
+    const price = this.validateNumber(
+      data.purchasePrice,
+      'Purchase price'
+    );
+
+    if (!quantity || !price) {
+      throw new Error('Quantity and purchase price must be greater than zero.');
+    }
+
+    const existing = this.holdings.find(
+      h => h.symbol === symbol
+    );
+
+    if (existing) {
+      const totalQuantity = existing.quantity + quantity;
+
+      existing.averagePrice = (
+        existing.quantity * existing.averagePrice +
+        quantity * price
+      ) / totalQuantity;
+
+      existing.quantity = totalQuantity;
+      existing.updatedAt = new Date().toISOString();
+
+    } else {
+      this.holdings.push({
+        id: this.createId(),
+        symbol,
+        quantity,
+        averagePrice: price,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    this.save();
+
+    return this.getHolding(symbol);
+  },
+
+  createId() {
+    if (window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+
+    return 'asset-' + Date.now() + '-' +
+      Math.random().toString(36).slice(2);
+  },
+
+  getHolding(symbol) {
+    return this.holdings.find(
+      h => h.symbol === String(symbol).toUpperCase()
+    ) || null;
+  },
+
+  updateHolding(symbol, updates) {
+    const holding = this.getHolding(symbol);
+
+    if (!holding) {
+      throw new Error('Holding not found.');
+    }
+
+    if (updates.quantity !== undefined) {
+      holding.quantity = this.validateNumber(
+        updates.quantity,
+        'Quantity'
+      );
+    }
+
+    if (updates.purchasePrice !== undefined) {
+      holding.averagePrice = this.validateNumber(
+        updates.purchasePrice,
+        'Purchase price'
+      );
+    }
+
+    holding.updatedAt = new Date().toISOString();
+
+    if (holding.quantity === 0) {
+      this.holdings = this.holdings.filter(
+        h => h.symbol !== holding.symbol
+      );
+    }
+
+    this.save();
+
+    return this.getHolding(symbol);
+  },
+
+  removeHolding(symbol) {
+    const normalized = String(symbol).toUpperCase();
+
+    const previousLength = this.holdings.length;
+
+    this.holdings = this.holdings.filter(
+      h => h.symbol !== normalized
+    );
+
+    this.save();
+
+    return this.holdings.length < previousLength;
+  },
+
+  recordSale(symbol, quantity, salePrice) {
+    const holding = this.getHolding(symbol);
+
+    if (!holding) {
+      throw new Error('Holding not found.');
+    }
+
+    quantity = this.validateNumber(quantity, 'Sale quantity');
+    salePrice = this.validateNumber(salePrice, 'Sale price');
+
+    if (!quantity || quantity > holding.quantity) {
+      throw new Error('Invalid sale quantity.');
+    }
+
+    const profit = (
+      salePrice - holding.averagePrice
+    ) * quantity;
+
+    this.realizedPnL += profit;
+
+    holding.quantity -= quantity;
+
+    if (holding.quantity <= 0) {
+      this.holdings = this.holdings.filter(
+        h => h.symbol !== holding.symbol
+      );
+    }
+
+    this.save();
+
+    return {
+      symbol: String(symbol).toUpperCase(),
+      quantitySold: quantity,
+      salePrice,
+      realizedPnL: profit,
+      totalRealizedPnL: this.realizedPnL
+    };
+  },
+
+  getHoldingValue(holding, marketPrice) {
+    marketPrice = Number(marketPrice);
+
+    if (!Number.isFinite(marketPrice) || marketPrice < 0) {
+      throw new Error('Invalid market price.');
+    }
+
+    const marketValue = holding.quantity * marketPrice;
+
+    const costBasis = holding.quantity * holding.averagePrice;
+
+    const unrealizedPnL = marketValue - costBasis;
+
+    const pnlPercentage = costBasis
+      ? unrealizedPnL / costBasis * 100
+      : 0;
+
+    return {
+      symbol: holding.symbol,
+      quantity: holding.quantity,
+      averagePrice: holding.averagePrice,
+      marketPrice,
+      marketValue,
+      costBasis,
+      unrealizedPnL,
+      pnlPercentage
+    };
+  },
+
+  getSummary(prices = {}) {
+    let totalValue = 0;
+    let totalCost = 0;
+    let pricedAssets = 0;
+
+    const assets = this.holdings.map(holding => {
+      const price = Number(prices[holding.symbol]);
+
+      const validPrice = Number.isFinite(price) && price >= 0;
+
+      if (!validPrice) {
+        return {
+          ...holding,
+          marketPrice: null,
+          marketValue: null,
+          unrealizedPnL: null,
+          pnlPercentage: null,
+          allocation: null,
+          priceUnavailable: true
+        };
+      }
+
+      const result = this.getHoldingValue(holding, price);
+
+      totalValue += result.marketValue;
+      totalCost += result.costBasis;
+      pricedAssets++;
+
+      return {
+        ...result,
+        allocation: null,
+        priceUnavailable: false
+      };
+    });
+
+    assets.forEach(asset => {
+      if (asset.marketValue !== null && totalValue > 0) {
+        asset.allocation =
+          asset.marketValue / totalValue * 100;
+      }
+    });
+
+    const unrealizedPnL = totalValue - totalCost;
+
+    const performance = totalCost > 0
+      ? unrealizedPnL / totalCost * 100
+      : 0;
+
+    return {
+      totalValue,
+      totalCost,
+      unrealizedPnL,
+      realizedPnL: this.realizedPnL,
+      totalPnL: unrealizedPnL + this.realizedPnL,
+      performance,
+      assets,
+      holdingsCount: this.holdings.length,
+      pricedAssets,
+      unpricedAssets: this.holdings.length - pricedAssets,
+      timestamp: new Date().toISOString()
+    };
+  },
+
+  getAllocation(prices = {}) {
+    const summary = this.getSummary(prices);
+
+    return summary.assets
+      .filter(asset => asset.allocation !== null)
+      .map(asset => ({
+        symbol: asset.symbol,
+        allocation: asset.allocation,
+        value: asset.marketValue
+      }))
+      .sort((a, b) => b.allocation - a.allocation);
+  },
+
+  getPerformance(prices = {}) {
+    const summary = this.getSummary(prices);
+
+    return {
+      totalValue: summary.totalValue,
+      totalCost: summary.totalCost,
+      realizedPnL: summary.realizedPnL,
+      unrealizedPnL: summary.unrealizedPnL,
+      totalPnL: summary.totalPnL,
+      percentage: summary.performance
+    };
+  },
+
+  save() {
+    try {
+      localStorage.setItem(
+        'crypto_terminal_portfolio',
+        JSON.stringify({
+          holdings: this.holdings,
+          realizedPnL: this.realizedPnL,
+          version: 1
+        })
+      );
+
+      return true;
+
+    } catch (error) {
+      console.error('Portfolio save failed:', error);
+      return false;
+    }
+  },
+
+  load() {
+    try {
+      const stored = localStorage.getItem(
+        'crypto_terminal_portfolio'
+      );
+
+      if (!stored) return false;
+
+      const parsed = JSON.parse(stored);
+
+      if (!parsed || !Array.isArray(parsed.holdings)) {
+        return false;
+      }
+
+      this.holdings = parsed.holdings.filter(h =>
+        h &&
+        typeof h.symbol === 'string' &&
+        Number.isFinite(h.quantity) &&
+        Number.isFinite(h.averagePrice) &&
+        h.quantity > 0 &&
+        h.averagePrice > 0
+      );
+
+      this.realizedPnL = Number.isFinite(parsed.realizedPnL)
+        ? parsed.realizedPnL
+        : 0;
+
+      return true;
+
+    } catch (error) {
+      console.error('Portfolio load failed:', error);
+      this.holdings = [];
+      this.realizedPnL = 0;
+      return false;
+    }
+  },
+
+  exportJSON() {
+    return JSON.stringify({
+      holdings: this.holdings,
+      realizedPnL: this.realizedPnL,
+      exportedAt: new Date().toISOString()
+    }, null, 2);
+  },
+
+  clear() {
+    this.holdings = [];
+    this.realizedPnL = 0;
+
+    try {
+      localStorage.removeItem(
+        'crypto_terminal_portfolio'
+      );
+    } catch (error) {
+      console.error('Portfolio clearing failed:', error);
+    }
+
+    return true;
   }
+
 };
 
-/* ---------------------------------------------------------
-   START
---------------------------------------------------------- */
+window.CryptoPortfolio = CryptoPortfolio;
 
-if (document.readyState === 'loading') {
-  document.addEventListener(
-    'DOMContentLoaded',
-    initializePortfolio
-  );
-} else {
-  initializePortfolio();
-}
+CryptoPortfolio.init();
 
-console.info(
-  'Crypto Intelligence Terminal portfolio module loaded.'
-);
+console.info('Crypto Intelligence Terminal portfolio loaded.');
