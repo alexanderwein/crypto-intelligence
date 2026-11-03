@@ -1,506 +1,440 @@
 /* =========================================================
    CRYPTO INTELLIGENCE TERMINAL
-   PERSONAL WATCHLIST
+   CRYPTOCURRENCY WATCHLIST
    File: js/watchlist.js
 ========================================================= */
 
 'use strict';
 
-/* ---------------------------------------------------------
-   CONFIGURATION
---------------------------------------------------------- */
+const CryptoWatchlist = {
 
-const WATCHLIST_CONFIG = {
-  storageKey: 'crypto_intelligence_watchlist',
-
-  maximumCoins: 50
-};
-
-/* ---------------------------------------------------------
-   WATCHLIST STATE
---------------------------------------------------------- */
-
-const Watchlist = {
   coins: [],
+  initialized: false,
+  refreshTimer: null,
 
-  initialized: false
-};
+  config: {
+    storageKey: 'cit-watchlist',
+    refreshInterval: 30000,
+    maxCoins: 50
+  },
 
-/* ---------------------------------------------------------
-   HELPERS
---------------------------------------------------------- */
+  init() {
+    if (this.initialized) return;
 
-function watchlistElement(id) {
-  return document.getElementById(id);
-}
+    this.load();
+    this.bindEvents();
+    this.render();
+    this.refreshPrices();
+    this.startAutoRefresh();
 
-function watchlistEscape(value) {
-  return String(value ?? '').replace(
-    /[&<>"']/g,
-    character => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    })[character]
-  );
-}
+    this.initialized = true;
 
-function watchlistCurrency(value) {
-  if (!Number.isFinite(Number(value))) return '--';
+    console.info('Crypto watchlist initialized.');
+  },
 
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: Number(value) < 1 ? 6 : 2
-  }).format(value);
-}
+  add(symbol, name = '') {
+    symbol = String(symbol || '').trim().toUpperCase();
 
-/* ---------------------------------------------------------
-   SAVE WATCHLIST
---------------------------------------------------------- */
+    if (!symbol) {
+      throw new Error('Enter a cryptocurrency symbol.');
+    }
 
-function saveWatchlist() {
-  try {
-    localStorage.setItem(
-      WATCHLIST_CONFIG.storageKey,
-      JSON.stringify(Watchlist.coins)
+    if (!/^[A-Z0-9]{2,20}$/.test(symbol)) {
+      throw new Error('Invalid cryptocurrency symbol.');
+    }
+
+    if (this.coins.some(coin => coin.symbol === symbol)) {
+      return false;
+    }
+
+    if (this.coins.length >= this.config.maxCoins) {
+      throw new Error('Watchlist limit reached.');
+    }
+
+    const coin = {
+      symbol,
+      name: String(name || symbol),
+      addedAt: Date.now(),
+      price: null,
+      change24h: null,
+      loading: true
+    };
+
+    this.coins.push(coin);
+
+    this.save();
+    this.render();
+    this.refreshCoin(symbol);
+
+    return coin;
+  },
+
+  remove(symbol) {
+    this.coins = this.coins.filter(
+      coin => coin.symbol !== symbol
     );
 
+    this.save();
+    this.render();
+  },
+
+  has(symbol) {
+    return this.coins.some(
+      coin => coin.symbol === String(symbol).toUpperCase()
+    );
+  },
+
+  toggle(symbol, name = '') {
+    if (this.has(symbol)) {
+      this.remove(symbol);
+      return false;
+    }
+
+    this.add(symbol, name);
     return true;
+  },
 
-  } catch (error) {
-    console.error('Watchlist storage error:', error);
+  async refreshCoin(symbol) {
+    if (typeof CryptoMarketData === 'undefined') return;
 
-    return false;
-  }
-}
-
-/* ---------------------------------------------------------
-   LOAD WATCHLIST
---------------------------------------------------------- */
-
-function loadWatchlist() {
-  try {
-    const stored = localStorage.getItem(
-      WATCHLIST_CONFIG.storageKey
+    const coin = this.coins.find(
+      item => item.symbol === symbol
     );
 
-    if (!stored) {
-      Watchlist.coins = ['BTC', 'ETH', 'SOL'].map(
-        symbol => ({
-          symbol,
-          favorite: true,
-          addedAt: Date.now()
-        })
+    if (!coin) return;
+
+    try {
+      const result = await CryptoMarketData.getPrice(symbol);
+
+      const price = Number(
+        typeof result === 'object'
+          ? result.price
+          : result
       );
 
-      saveWatchlist();
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new Error('Invalid market price.');
+      }
 
-      return Watchlist.coins;
+      coin.price = price;
+      coin.loading = false;
+
+      if (typeof CryptoMarketData.get24HourChange === 'function') {
+        const change = Number(
+          CryptoMarketData.get24HourChange(symbol)
+        );
+
+        coin.change24h = Number.isFinite(change)
+          ? change
+          : null;
+      }
+
+      this.save();
+      this.render();
+
+    } catch (error) {
+      coin.loading = false;
+      console.warn('Watchlist update failed:', symbol, error);
+      this.render();
     }
+  },
 
-    const parsed = JSON.parse(stored);
-
-    if (!Array.isArray(parsed)) {
-      throw new Error('Invalid saved watchlist.');
-    }
-
-    Watchlist.coins = parsed
-      .filter(item =>
-        item &&
-        typeof item.symbol === 'string'
+  async refreshPrices() {
+    await Promise.all(
+      this.coins.map(coin =>
+        this.refreshCoin(coin.symbol)
       )
-      .slice(0, WATCHLIST_CONFIG.maximumCoins);
-
-    return Watchlist.coins;
-
-  } catch (error) {
-    console.error('Unable to load watchlist:', error);
-
-    Watchlist.coins = [];
-
-    return [];
-  }
-}
-
-/* ---------------------------------------------------------
-   FIND MARKET COIN
---------------------------------------------------------- */
-
-function findMarketCoin(symbol) {
-  if (!window.CryptoDashboard) return null;
-
-  const state = window.CryptoDashboard;
-
-  if (typeof state.getState !== 'function') {
-    return null;
-  }
-
-  const marketCoins = state.marketCoins || [];
-
-  return marketCoins.find(
-    coin => coin.symbol === symbol
-  ) || null;
-}
-
-/* ---------------------------------------------------------
-   ADD COIN
---------------------------------------------------------- */
-
-function addToWatchlist(symbol) {
-  if (!symbol || typeof symbol !== 'string') {
-    return false;
-  }
-
-  symbol = symbol.trim().toUpperCase();
-
-  const existing = Watchlist.coins.find(
-    coin => coin.symbol === symbol
-  );
-
-  if (existing) {
-    return false;
-  }
-
-  if (
-    Watchlist.coins.length >=
-    WATCHLIST_CONFIG.maximumCoins
-  ) {
-    alert('Watchlist limit reached.');
-
-    return false;
-  }
-
-  Watchlist.coins.push({
-    symbol,
-
-    favorite: false,
-
-    addedAt: Date.now()
-  });
-
-  saveWatchlist();
-
-  renderWatchlist();
-
-  return true;
-}
-
-/* ---------------------------------------------------------
-   REMOVE COIN
---------------------------------------------------------- */
-
-function removeFromWatchlist(symbol) {
-  Watchlist.coins = Watchlist.coins.filter(
-    coin => coin.symbol !== symbol
-  );
-
-  saveWatchlist();
-
-  renderWatchlist();
-}
-
-/* ---------------------------------------------------------
-   TOGGLE FAVORITE
---------------------------------------------------------- */
-
-function toggleFavorite(symbol) {
-  const coin = Watchlist.coins.find(
-    item => item.symbol === symbol
-  );
-
-  if (!coin) return;
-
-  coin.favorite = !coin.favorite;
-
-  saveWatchlist();
-
-  renderWatchlist();
-}
-
-/* ---------------------------------------------------------
-   CHECK MEMBERSHIP
---------------------------------------------------------- */
-
-function isInWatchlist(symbol) {
-  return Watchlist.coins.some(
-    coin => coin.symbol === symbol
-  );
-}
-
-/* ---------------------------------------------------------
-   GET CURRENT MARKET DATA
---------------------------------------------------------- */
-
-function getWatchlistMarketData() {
-  const marketCoins =
-    window.CryptoDashboard &&
-    window.CryptoDashboard.getState
-      ? window.CryptoDashboard.getState()
-      : null;
-
-  const source =
-    window.CryptoDashboard &&
-    window.CryptoDashboard.coins
-      ? window.CryptoDashboard.coins
-      : [];
-
-  return source;
-}
-
-/* ---------------------------------------------------------
-   RENDER WATCHLIST
---------------------------------------------------------- */
-
-function renderWatchlist() {
-  const container = watchlistElement('watchlist');
-
-  if (!container) return;
-
-  const marketCoins = getWatchlistMarketData();
-
-  const html = Watchlist.coins.map(item => {
-    const marketCoin = marketCoins.find(
-      coin => coin.symbol === item.symbol
     );
+  },
 
-    const name = marketCoin
-      ? marketCoin.name
-      : item.symbol;
+  startAutoRefresh() {
+    this.stopAutoRefresh();
 
-    const price = marketCoin
-      ? watchlistCurrency(marketCoin.price)
-      : '--';
+    this.refreshTimer = setInterval(() => {
+      if (!document.hidden) {
+        this.refreshPrices();
+      }
+    }, this.config.refreshInterval);
+  },
 
-    const change = marketCoin
-      ? Number(marketCoin.change24h)
-      : null;
+  stopAutoRefresh() {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  },
 
-    const changeText = change === null
-      ? '--'
-      : (change >= 0 ? '+' : '') +
-        change.toFixed(2) + '%';
+  sort(method = 'symbol') {
+    const methods = {
+      symbol: (a, b) =>
+        a.symbol.localeCompare(b.symbol),
 
-    const direction = change === null
-      ? ''
-      : change >= 0
-        ? 'positive'
-        : 'negative';
+      price: (a, b) =>
+        (b.price || 0) - (a.price || 0),
 
-    return `
-      <div class="watchlist-item">
+      change: (a, b) =>
+        (b.change24h || 0) - (a.change24h || 0),
 
-        <button
-          type="button"
-          class="watchlist-coin"
-          data-select="${watchlistEscape(item.symbol)}"
-        >
-          <strong>${watchlistEscape(item.symbol)}</strong>
+      added: (a, b) =>
+        a.addedAt - b.addedAt
+    };
 
-          <span>${watchlistEscape(name)}</span>
-        </button>
+    if (methods[method]) {
+      this.coins.sort(methods[method]);
+      this.render();
+    }
+  },
 
-        <div class="watchlist-price">
-          <strong>${price}</strong>
+  bindEvents() {
+    document.addEventListener('click', event => {
 
-          <span class="${direction}">
-            ${changeText}
-          </span>
-        </div>
+      const removeButton = event.target.closest(
+        '[data-watchlist-remove]'
+      );
 
-        <button
-          type="button"
-          class="watchlist-favorite"
-          data-favorite="${watchlistEscape(item.symbol)}"
-          aria-label="Toggle favorite"
-        >
-          ${item.favorite ? '★' : '☆'}
-        </button>
+      if (removeButton) {
+        this.remove(removeButton.dataset.watchlistRemove);
+        return;
+      }
 
-        <button
-          type="button"
-          class="watchlist-remove"
-          data-remove="${watchlistEscape(item.symbol)}"
-          aria-label="Remove coin"
-        >
-          ×
-        </button>
+      const selectButton = event.target.closest(
+        '[data-watchlist-select]'
+      );
 
-      </div>
-    `;
-  }).join('');
+      if (selectButton) {
+        const symbol = selectButton.dataset.watchlistSelect;
 
-  container.innerHTML = html ||
-    '<p class="empty-watchlist">Your watchlist is empty.</p>';
+        if (window.CryptoDashboard) {
+          CryptoDashboard.selectCoin(symbol);
+        }
 
-  bindWatchlistEvents();
+        return;
+      }
 
-  const count = watchlistElement('watchlistCount');
+      const addButton = event.target.closest(
+        '[data-watchlist-add]'
+      );
 
-  if (count) {
-    count.textContent = Watchlist.coins.length;
-  }
-}
+      if (addButton) {
+        const symbol = addButton.dataset.watchlistAdd;
 
-/* ---------------------------------------------------------
-   WATCHLIST EVENTS
---------------------------------------------------------- */
+        try {
+          this.add(symbol);
 
-function bindWatchlistEvents() {
-  const container = watchlistElement('watchlist');
-
-  if (!container) return;
-
-  container.querySelectorAll('[data-select]').forEach(button => {
-    button.addEventListener('click', () => {
-      const symbol = button.dataset.select;
-
-      if (window.CryptoDashboard) {
-        window.CryptoDashboard.selectCoin(symbol);
+          if (window.showNotification) {
+            window.showNotification(
+              symbol + ' added to watchlist.',
+              'success'
+            );
+          }
+        } catch (error) {
+          if (window.showNotification) {
+            window.showNotification(error.message, 'error');
+          }
+        }
       }
     });
-  });
 
-  container.querySelectorAll('[data-favorite]').forEach(button => {
-    button.addEventListener('click', () => {
-      toggleFavorite(button.dataset.favorite);
-    });
-  });
+    const form = document.querySelector('#watchlist-form');
 
-  container.querySelectorAll('[data-remove]').forEach(button => {
-    button.addEventListener('click', () => {
-      removeFromWatchlist(button.dataset.remove);
-    });
-  });
-}
+    if (form) {
+      form.addEventListener('submit', event => {
+        event.preventDefault();
 
-/* ---------------------------------------------------------
-   ADD CURRENT COIN
---------------------------------------------------------- */
+        const input = form.querySelector(
+          '[name="symbol"]'
+        );
 
-function addSelectedCoinToWatchlist() {
-  const symbol =
-    window.CryptoDashboard &&
-    window.CryptoDashboard.getState
-      ? window.CryptoDashboard.getState().selectedCoin
-      : null;
+        if (!input) return;
 
-  if (!symbol) return false;
+        try {
+          this.add(input.value);
+          input.value = '';
 
-  return addToWatchlist(symbol);
-}
+          if (window.showNotification) {
+            window.showNotification(
+              'Cryptocurrency added.',
+              'success'
+            );
+          }
+        } catch (error) {
+          if (window.showNotification) {
+            window.showNotification(error.message, 'error');
+          }
+        }
+      });
+    }
 
-/* ---------------------------------------------------------
-   WATCHLIST SEARCH
---------------------------------------------------------- */
-
-function initializeWatchlistSearch() {
-  const input = watchlistElement('watchlistSearch');
-
-  if (!input) return;
-
-  input.addEventListener('keydown', event => {
-    if (event.key !== 'Enter') return;
-
-    const symbol = input.value.trim().toUpperCase();
-
-    if (!symbol) return;
-
-    const marketCoins = getWatchlistMarketData();
-
-    const coin = marketCoins.find(
-      item =>
-        item.symbol === symbol ||
-        item.name.toUpperCase() === symbol
+    const sortSelect = document.querySelector(
+      '#watchlist-sort'
     );
 
-    if (!coin) {
-      alert('Coin not found in the loaded market list.');
+    if (sortSelect) {
+      sortSelect.addEventListener('change', event => {
+        this.sort(event.target.value);
+      });
+    }
 
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.stopAutoRefresh();
+      } else {
+        this.startAutoRefresh();
+        this.refreshPrices();
+      }
+    });
+  },
+
+  render() {
+    const container = document.querySelector(
+      '#watchlist-container'
+    );
+
+    if (!container) return;
+
+    const fragment = document.createDocumentFragment();
+
+    if (!this.coins.length) {
+      const empty = document.createElement('p');
+
+      empty.className = 'watchlist-empty';
+      empty.textContent =
+        'Your watchlist is empty. Add a cryptocurrency to start tracking.';
+
+      fragment.appendChild(empty);
+      container.replaceChildren(fragment);
+
+      this.updateCount();
       return;
     }
 
-    addToWatchlist(coin.symbol);
+    this.coins.forEach(coin => {
+      const row = document.createElement('div');
 
-    input.value = '';
-  });
-}
+      row.className = 'watchlist-row';
 
-/* ---------------------------------------------------------
-   UPDATE MARKET PRICES
---------------------------------------------------------- */
+      const name = document.createElement('span');
+      name.className = 'watchlist-symbol';
+      name.textContent = coin.symbol;
 
-function updateWatchlistPrices() {
-  renderWatchlist();
-}
+      const price = document.createElement('span');
+      price.className = 'watchlist-price';
 
-/* ---------------------------------------------------------
-   INITIALIZE
---------------------------------------------------------- */
+      price.textContent = coin.loading
+        ? 'Loading...'
+        : coin.price === null
+          ? 'Unavailable'
+          : this.formatPrice(coin.price);
 
-function initializeWatchlist() {
-  if (Watchlist.initialized) return;
+      const change = document.createElement('span');
+      change.className = 'watchlist-change';
 
-  loadWatchlist();
+      if (coin.change24h === null) {
+        change.textContent = '--';
+      } else {
+        change.textContent =
+          (coin.change24h >= 0 ? '+' : '') +
+          coin.change24h.toFixed(2) + '%';
 
-  initializeWatchlistSearch();
+        change.classList.add(
+          coin.change24h >= 0 ? 'positive' : 'negative'
+        );
+      }
 
-  renderWatchlist();
+      const select = document.createElement('button');
+      select.type = 'button';
+      select.textContent = 'Chart';
+      select.dataset.watchlistSelect = coin.symbol;
 
-  Watchlist.initialized = true;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.dataset.watchlistRemove = coin.symbol;
 
-  console.info('Watchlist initialized.');
-}
+      row.append(
+        name,
+        price,
+        change,
+        select,
+        remove
+      );
 
-/* ---------------------------------------------------------
-   PUBLIC API
---------------------------------------------------------- */
+      fragment.appendChild(row);
+    });
 
-window.CryptoWatchlist = {
-  initializeWatchlist,
+    container.replaceChildren(fragment);
 
-  addToWatchlist,
-
-  removeFromWatchlist,
-
-  toggleFavorite,
-
-  isInWatchlist,
-
-  renderWatchlist,
-
-  updateWatchlistPrices,
-
-  addSelectedCoinToWatchlist,
-
-  getCoins() {
-    return [...Watchlist.coins];
+    this.updateCount();
   },
 
-  clear() {
-    Watchlist.coins = [];
+  updateCount() {
+    const counter = document.querySelector(
+      '#watchlist-count'
+    );
 
-    saveWatchlist();
+    if (counter) {
+      counter.textContent = this.coins.length;
+    }
+  },
 
-    renderWatchlist();
+  formatPrice(value) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: value < 1 ? 8 : 2
+    }).format(value);
+  },
+
+  getCoins() {
+    return this.coins.map(coin => ({ ...coin }));
+  },
+
+  save() {
+    try {
+      localStorage.setItem(
+        this.config.storageKey,
+        JSON.stringify(this.coins)
+      );
+    } catch (error) {
+      console.warn('Watchlist storage failed:', error);
+    }
+  },
+
+  load() {
+    try {
+      const stored = localStorage.getItem(
+        this.config.storageKey
+      );
+
+      if (!stored) return;
+
+      const parsed = JSON.parse(stored);
+
+      if (Array.isArray(parsed)) {
+        this.coins = parsed
+          .filter(coin =>
+            coin &&
+            typeof coin.symbol === 'string'
+          )
+          .slice(0, this.config.maxCoins);
+      }
+    } catch (error) {
+      console.warn('Could not restore watchlist:', error);
+      this.coins = [];
+    }
+  },
+
+  destroy() {
+    this.stopAutoRefresh();
+    this.initialized = false;
   }
+
 };
 
-/* ---------------------------------------------------------
-   START
---------------------------------------------------------- */
+window.CryptoWatchlist = CryptoWatchlist;
 
-if (document.readyState === 'loading') {
-  document.addEventListener(
-    'DOMContentLoaded',
-    initializeWatchlist
-  );
-} else {
-  initializeWatchlist();
-}
+document.addEventListener('DOMContentLoaded', () => {
+  CryptoWatchlist.init();
+});
 
-console.info(
-  'Crypto Intelligence Terminal watchlist loaded.'
-);
+console.info('Crypto watchlist module loaded.');
