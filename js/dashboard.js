@@ -6,662 +6,569 @@
 
 'use strict';
 
-/* ---------------------------------------------------------
-   DASHBOARD STATE
---------------------------------------------------------- */
+const CryptoDashboard = {
 
-const Dashboard = {
-  coins: [],
-  selectedCoin: 'BTC',
+  config: {
+    defaultSymbol: 'BTCUSDT',
+    defaultTimeframe: '1d',
+    refreshInterval: 30000,
+    candleLimit: 500
+  },
 
-  searchQuery: '',
+  state: {
+    symbol: 'BTCUSDT',
+    timeframe: '1d',
+    chart: null,
+    initialized: false,
+    refreshing: false,
+    lastUpdated: null,
+    refreshTimer: null,
+    marketData: null,
+    selectedCoin: null
+  },
 
-  refreshInterval: null,
+  elements: {},
 
-  refreshing: false,
+  init() {
+    if (this.state.initialized) return;
 
-  lastUpdated: null,
+    console.info('Initializing Crypto Intelligence Terminal...');
 
-  market: {},
+    this.cacheElements();
+    this.bindEvents();
+    this.initializeChart();
+    this.loadInitialMarket();
 
-  selectedRange: '1D',
-  selectedInterval: '1h'
-};
+    this.state.initialized = true;
 
-/* ---------------------------------------------------------
-   DOM HELPERS
---------------------------------------------------------- */
+    this.startAutoRefresh();
 
-function getElement(id) {
-  return document.getElementById(id);
-}
+    console.info('Dashboard initialized.');
+  },
 
-function setText(id, value) {
-  const element = getElement(id);
-
-  if (element) {
-    element.textContent = value;
-  }
-}
-
-function formatCurrency(value) {
-  if (!Number.isFinite(Number(value))) return '--';
-
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: Number(value) < 1 ? 6 : 2
-  }).format(value);
-}
-
-function formatCompact(value) {
-  if (!Number.isFinite(Number(value))) return '--';
-
-  return new Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function formatPercentage(value) {
-  if (!Number.isFinite(Number(value))) return '--';
-
-  return (value >= 0 ? '+' : '') +
-    Number(value).toFixed(2) + '%';
-}
-
-/* ---------------------------------------------------------
-   SAFE HTML
---------------------------------------------------------- */
-
-function escapeHTML(value) {
-  return String(value ?? '').replace(
-    /[&<>"']/g,
-    character => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    })[character]
-  );
-}
-
-/* ---------------------------------------------------------
-   CONNECTION STATUS
---------------------------------------------------------- */
-
-function setConnectionStatus(status, message) {
-  const element = getElement('connectionStatus');
-
-  if (!element) return;
-
-  element.textContent = message || status;
-
-  element.dataset.status = status;
-
-  element.className = 'connection-status ' + status;
-}
-
-/* ---------------------------------------------------------
-   LOAD MARKET DATA
---------------------------------------------------------- */
-
-async function loadMarketData() {
-  try {
-    setConnectionStatus(
-      'loading',
-      'Connecting to market data...'
-    );
-
-    const coins = await window.CryptoAPI.getTopCoins(50);
-
-    if (!Array.isArray(coins)) {
-      throw new Error('Invalid market response.');
-    }
-
-    Dashboard.coins = coins;
-
-    Dashboard.lastUpdated = new Date();
-
-    renderCoinTable();
-
-    updateMarketStatistics(coins);
-
-    setConnectionStatus(
-      'connected',
-      'Market data connected'
-    );
-
-    return coins;
-
-  } catch (error) {
-    console.error('Market data error:', error);
-
-    setConnectionStatus(
-      'error',
-      'Market data unavailable'
-    );
-
-    return [];
-  }
-}
-
-/* ---------------------------------------------------------
-   RENDER TOP 50 TABLE
---------------------------------------------------------- */
-
-function renderCoinTable() {
-  const table = getElement('coinTable');
-
-  if (!table) return;
-
-  const filtered = Dashboard.coins.filter(coin => {
-    const query = Dashboard.searchQuery.toLowerCase();
-
-    return (
-      String(coin.name || '').toLowerCase().includes(query) ||
-      String(coin.symbol || '').toLowerCase().includes(query)
-    );
-  });
-
-  table.innerHTML = filtered.map((coin, index) => {
-    const symbol = escapeHTML(coin.symbol);
-
-    const name = escapeHTML(coin.name);
-
-    const price = Number(coin.price);
-
-    const change = Number(coin.change24h);
-
-    const positive = change >= 0;
-
-    const selected =
-      coin.symbol === Dashboard.selectedCoin;
-
-    return `
-      <tr
-        class="coin-row ${selected ? 'selected' : ''}"
-        data-symbol="${symbol}"
-        tabindex="0"
-        role="button"
-        aria-label="Select ${name}"
-      >
-        <td>${index + 1}</td>
-
-        <td class="coin-name">
-          <strong>${symbol}</strong>
-          <span>${name}</span>
-        </td>
-
-        <td>${formatCurrency(price)}</td>
-
-        <td class="${positive ? 'positive' : 'negative'}">
-          ${formatPercentage(change)}
-        </td>
-
-        <td>
-          ${formatCompact(coin.marketCap)}
-        </td>
-
-        <td>
-          ${formatCompact(coin.volume24h)}
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  table.querySelectorAll('.coin-row').forEach(row => {
-    const select = () => {
-      selectCoin(row.dataset.symbol);
+  cacheElements() {
+    const selectors = {
+      chart: '#main-chart',
+      symbol: '#selected-symbol',
+      price: '#selected-price',
+      change: '#selected-change',
+      volume: '#selected-volume',
+      marketCap: '#selected-market-cap',
+      signal: '#selected-signal',
+      timeframe: '#timeframe-selector',
+      coinSearch: '#coin-search',
+      marketTable: '#market-table',
+      lastUpdated: '#last-updated',
+      refresh: '#refresh-market',
+      loading: '#dashboard-loading'
     };
 
-    row.addEventListener('click', select);
+    Object.entries(selectors).forEach(([key, selector]) => {
+      this.elements[key] = document.querySelector(selector);
+    });
+  },
 
-    row.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        select();
+  bindEvents() {
+    document.addEventListener('click', event => {
+      const coin = event.target.closest('[data-symbol]');
+
+      if (coin) {
+        const symbol = coin.dataset.symbol;
+
+        if (symbol) {
+          this.selectCoin(symbol);
+        }
       }
-    });
-  });
-}
 
-/* ---------------------------------------------------------
-   MARKET STATISTICS
---------------------------------------------------------- */
+      const timeframe = event.target.closest('[data-timeframe]');
 
-function updateMarketStatistics(coins) {
-  if (!coins.length) return;
+      if (timeframe) {
+        this.changeTimeframe(timeframe.dataset.timeframe);
+      }
 
-  const marketCap = coins.reduce(
-    (sum, coin) => sum + (Number(coin.marketCap) || 0),
-    0
-  );
+      const indicator = event.target.closest('[data-indicator]');
 
-  const totalVolume = coins.reduce(
-    (sum, coin) => sum + (Number(coin.volume24h) || 0),
-    0
-  );
-
-  const positive = coins.filter(
-    coin => Number(coin.change24h) > 0
-  ).length;
-
-  const negative = coins.filter(
-    coin => Number(coin.change24h) < 0
-  ).length;
-
-  setText('marketCap', formatCurrency(marketCap));
-
-  setText('marketVolume', formatCurrency(totalVolume));
-
-  setText('advancingCoins', positive);
-
-  setText('decliningCoins', negative);
-
-  const btc = coins.find(
-    coin => coin.symbol === 'BTC'
-  );
-
-  if (btc) {
-    setText('btcPrice', formatCurrency(btc.price));
-
-    setText(
-      'btcChange',
-      formatPercentage(btc.change24h)
-    );
-  }
-}
-
-/* ---------------------------------------------------------
-   SELECT CRYPTOCURRENCY
---------------------------------------------------------- */
-
-async function selectCoin(symbol) {
-  const coin = Dashboard.coins.find(
-    item => item.symbol === symbol
-  );
-
-  if (!coin) return;
-
-  Dashboard.selectedCoin = symbol;
-
-  setText('selectedCoinName', coin.name);
-
-  setText('selectedCoinSymbol', symbol);
-
-  setText('selectedCoinPrice', formatCurrency(coin.price));
-
-  setText(
-    'selectedCoinChange',
-    formatPercentage(coin.change24h)
-  );
-
-  renderCoinTable();
-
-  try {
-    setConnectionStatus(
-      'loading',
-      'Loading ' + symbol + ' chart...'
-    );
-
-    await window.CryptoCharts.loadCryptoChart(
-      symbol,
-      Dashboard.selectedRange,
-      Dashboard.selectedInterval
-    );
-
-    setConnectionStatus(
-      'connected',
-      'Market data connected'
-    );
-
-  } catch (error) {
-    console.error('Coin selection error:', error);
-  }
-}
-
-/* ---------------------------------------------------------
-   UPDATE TRADING SIGNAL
---------------------------------------------------------- */
-
-function updateTradingSignal(indicators) {
-  try {
-    const result =
-      window.TradingSignals.generateTradingSignal(
-        indicators
-      );
-
-    Dashboard.lastSignal = result;
-
-    renderTradingSignal(result);
-
-    return result;
-
-  } catch (error) {
-    console.error('Signal calculation error:', error);
-
-    setText('tradingSignal', 'INSUFFICIENT DATA');
-
-    return null;
-  }
-}
-
-/* ---------------------------------------------------------
-   RENDER SIGNAL
---------------------------------------------------------- */
-
-function renderTradingSignal(result) {
-  if (!result) return;
-
-  const signalElement = getElement('tradingSignal');
-
-  if (signalElement) {
-    signalElement.textContent = result.signal;
-
-    signalElement.className =
-      'trading-signal ' +
-      result.signal.toLowerCase().replaceAll(' ', '-');
-  }
-
-  setText('signalScore', result.score + '/100');
-
-  setText('trendDirection', result.trend);
-
-  setText('signalAgreement', result.agreement + '%');
-
-  setText(
-    'signalPrice',
-    formatCurrency(result.price)
-  );
-
-  setText(
-    'stopLoss',
-    result.risk.stopLoss === null
-      ? '--'
-      : formatCurrency(result.risk.stopLoss)
-  );
-
-  setText(
-    'takeProfit',
-    result.risk.takeProfit === null
-      ? '--'
-      : formatCurrency(result.risk.takeProfit)
-  );
-
-  setText(
-    'riskReward',
-    result.risk.riskReward === null
-      ? '--'
-      : '1:' + result.risk.riskReward.toFixed(2)
-  );
-
-  setText(
-    'signalWarning',
-    result.warning || ''
-  );
-
-  renderIndicatorSummary(result.indicators);
-}
-
-/* ---------------------------------------------------------
-   RENDER INDICATOR SUMMARY
---------------------------------------------------------- */
-
-function renderIndicatorSummary(indicators) {
-  const container = getElement('indicatorSummary');
-
-  if (!container) return;
-
-  container.innerHTML = Object.entries(indicators)
-    .map(([name, result]) => {
-      const direction = result.direction;
-
-      return `
-        <div class="indicator-item">
-          <span>${escapeHTML(name)}</span>
-          <strong class="${direction}">
-            ${direction.toUpperCase()}
-          </strong>
-        </div>
-      `;
-    }).join('');
-}
-
-/* ---------------------------------------------------------
-   CHANGE HISTORICAL RANGE
---------------------------------------------------------- */
-
-async function selectHistoricalRange(range) {
-  Dashboard.selectedRange = range;
-
-  document.querySelectorAll('[data-range]').forEach(button => {
-    button.classList.toggle(
-      'active',
-      button.dataset.range === range
-    );
-  });
-
-  try {
-    await window.CryptoCharts.changeChartRange(
-      range,
-      Dashboard.selectedInterval
-    );
-
-  } catch (error) {
-    console.error('Range update failed:', error);
-  }
-}
-
-/* ---------------------------------------------------------
-   CHANGE CANDLE INTERVAL
---------------------------------------------------------- */
-
-async function selectInterval(interval) {
-  Dashboard.selectedInterval = interval;
-
-  document.querySelectorAll('[data-interval]').forEach(button => {
-    button.classList.toggle(
-      'active',
-      button.dataset.interval === interval
-    );
-  });
-
-  try {
-    await window.CryptoCharts.changeChartRange(
-      Dashboard.selectedRange,
-      interval
-    );
-
-  } catch (error) {
-    console.error('Interval update failed:', error);
-  }
-}
-
-/* ---------------------------------------------------------
-   SEARCH COINS
---------------------------------------------------------- */
-
-function initializeCoinSearch() {
-  const search = getElement('coinSearch');
-
-  if (!search) return;
-
-  search.addEventListener('input', event => {
-    Dashboard.searchQuery = event.target.value.trim();
-
-    renderCoinTable();
-  });
-}
-
-/* ---------------------------------------------------------
-   INITIALIZE RANGE BUTTONS
---------------------------------------------------------- */
-
-function initializeRangeButtons() {
-  document.querySelectorAll('[data-range]').forEach(button => {
-    button.addEventListener('click', () => {
-      selectHistoricalRange(button.dataset.range);
-    });
-  });
-
-  document.querySelectorAll('[data-interval]').forEach(button => {
-    button.addEventListener('click', () => {
-      selectInterval(button.dataset.interval);
-    });
-  });
-}
-
-/* ---------------------------------------------------------
-   REFRESH DASHBOARD
---------------------------------------------------------- */
-
-async function refreshDashboard() {
-  if (Dashboard.refreshing) return;
-
-  Dashboard.refreshing = true;
-
-  try {
-    const previousSelection = Dashboard.selectedCoin;
-
-    await loadMarketData();
-
-    if (previousSelection) {
-      const selected = Dashboard.coins.find(
-        coin => coin.symbol === previousSelection
-      );
-
-      if (selected) {
-        setText(
-          'selectedCoinPrice',
-          formatCurrency(selected.price)
-        );
-
-        setText(
-          'selectedCoinChange',
-          formatPercentage(selected.change24h)
+      if (indicator) {
+        this.toggleIndicator(
+          indicator.dataset.indicator,
+          indicator
         );
       }
+    });
+
+    if (this.elements.timeframe) {
+      this.elements.timeframe.addEventListener(
+        'change',
+        event => this.changeTimeframe(event.target.value)
+      );
     }
 
-  } finally {
-    Dashboard.refreshing = false;
+    if (this.elements.coinSearch) {
+      this.elements.coinSearch.addEventListener(
+        'input',
+        event => this.filterCoins(event.target.value)
+      );
+    }
+
+    if (this.elements.refresh) {
+      this.elements.refresh.addEventListener(
+        'click',
+        () => this.refreshMarket()
+      );
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.stopAutoRefresh();
+      } else {
+        this.startAutoRefresh();
+        this.refreshMarket();
+      }
+    });
+  },
+
+  initializeChart() {
+    if (
+      !this.elements.chart ||
+      typeof CryptoChartEngine === 'undefined'
+    ) {
+      console.warn('Chart engine or chart container unavailable.');
+      return;
+    }
+
+    this.state.chart = CryptoChartEngine.create(
+      this.elements.chart,
+      {
+        symbol: this.state.symbol,
+        timeframe: this.state.timeframe,
+        height: 560,
+
+        callbacks: {
+          onCrosshairMove: data => {
+            this.updateChartDetails(data);
+          },
+
+          onTimeframeChange: timeframe => {
+            this.state.timeframe = timeframe;
+          }
+        }
+      }
+    );
+
+    this.state.chart.setIndicators({
+      ema20: true,
+      ema50: true,
+      ema200: true,
+      bollinger: true,
+      volume: true,
+      rsi: true,
+      macd: true
+    });
+  },
+
+  async loadInitialMarket() {
+    await this.refreshMarket();
+  },
+
+  async refreshMarket() {
+    if (this.state.refreshing) return;
+
+    this.state.refreshing = true;
+
+    this.setLoading(true);
+
+    try {
+      await Promise.all([
+        this.loadMarketOverview(),
+        this.loadSelectedCoin()
+      ]);
+
+      this.state.lastUpdated = new Date();
+
+      this.updateLastUpdated();
+
+    } catch (error) {
+      console.error('Market refresh failed:', error);
+
+      this.notify(
+        'Unable to refresh market data. Please try again.',
+        'error'
+      );
+
+    } finally {
+      this.state.refreshing = false;
+      this.setLoading(false);
+    }
+  },
+
+  async loadMarketOverview() {
+    if (
+      typeof CryptoMarketScanner === 'undefined'
+    ) {
+      return;
+    }
+
+    const result = await CryptoMarketScanner.scan();
+
+    this.state.marketData = result;
+
+    this.renderMarketTable(result);
+  },
+
+  async loadSelectedCoin() {
+    if (
+      typeof CryptoMarketData === 'undefined' ||
+      !this.state.chart
+    ) {
+      return;
+    }
+
+    const candles = await CryptoMarketData.getBinanceCandles(
+      this.state.symbol,
+      this.state.timeframe,
+      this.config.candleLimit
+    );
+
+    if (!Array.isArray(candles) || !candles.length) {
+      throw new Error('No historical candles received.');
+    }
+
+    this.state.chart.setData(candles);
+
+    this.updateSelectedCoinDisplay(candles);
+    this.calculateSignal(candles);
+  },
+
+  async selectCoin(symbol) {
+    if (!symbol || symbol === this.state.symbol) return;
+
+    this.state.symbol = symbol;
+
+    if (this.state.chart) {
+      this.state.chart.setSymbol(symbol);
+    }
+
+    if (this.elements.symbol) {
+      this.elements.symbol.textContent = symbol;
+    }
+
+    try {
+      await this.loadSelectedCoin();
+
+    } catch (error) {
+      console.error('Coin selection failed:', error);
+
+      this.notify(
+        'Unable to load ' + symbol,
+        'error'
+      );
+    }
+  },
+
+  async changeTimeframe(timeframe) {
+    const allowed = [
+      '1m',
+      '5m',
+      '15m',
+      '30m',
+      '1h',
+      '4h',
+      '1d',
+      '1w',
+      '1M'
+    ];
+
+    if (!allowed.includes(timeframe)) return;
+
+    this.state.timeframe = timeframe;
+
+    if (this.state.chart) {
+      this.state.chart.setTimeframe(timeframe);
+    }
+
+    try {
+      await this.loadSelectedCoin();
+    } catch (error) {
+      console.error('Timeframe update failed:', error);
+    }
+  },
+
+  updateSelectedCoinDisplay(candles) {
+    if (!candles || !candles.length) return;
+
+    const latest = candles[candles.length - 1];
+
+    const previous = candles.length > 1
+      ? candles[candles.length - 2]
+      : latest;
+
+    const change = previous.close
+      ? ((latest.close - previous.close) /
+          previous.close) * 100
+      : 0;
+
+    this.setText('symbol', this.state.symbol);
+
+    this.setText(
+      'price',
+      this.formatCurrency(latest.close)
+    );
+
+    this.setText(
+      'change',
+      (change >= 0 ? '+' : '') +
+      change.toFixed(2) + '%'
+    );
+
+    this.setText(
+      'volume',
+      latest.volume.toLocaleString()
+    );
+
+    if (this.elements.change) {
+      this.elements.change.style.color =
+        change >= 0 ? '#00d69a' : '#ff526e';
+    }
+  },
+
+  calculateSignal(candles) {
+    if (
+      typeof CryptoSignalEngine === 'undefined'
+    ) {
+      return;
+    }
+
+    const signal = CryptoSignalEngine.analyze(candles);
+
+    if (!signal) return;
+
+    this.state.selectedCoin = signal;
+
+    this.renderSignal(signal);
+  },
+
+  renderSignal(signal) {
+    if (!this.elements.signal) return;
+
+    const action = String(
+      signal.action || signal.signal || 'HOLD'
+    ).toUpperCase();
+
+    const colors = {
+      BUY: '#00d69a',
+      SELL: '#ff526e',
+      HOLD: '#ffd166'
+    };
+
+    this.elements.signal.textContent = action;
+
+    this.elements.signal.style.color =
+      colors[action] || colors.HOLD;
+
+    const confidence = document.querySelector(
+      '#signal-confidence'
+    );
+
+    if (confidence) {
+      const value = Number(signal.confidence);
+
+      confidence.textContent =
+        Number.isFinite(value)
+          ? value.toFixed(1) + '%'
+          : 'N/A';
+    }
+
+    const explanation = document.querySelector(
+      '#signal-explanation'
+    );
+
+    if (explanation) {
+      explanation.textContent =
+        signal.reason ||
+        signal.explanation ||
+        'Based on available technical indicators.';
+    }
+  },
+
+  updateChartDetails(data) {
+    const element = document.querySelector(
+      '#chart-crosshair-details'
+    );
+
+    if (!element || !data.candle) return;
+
+    const candle = data.candle;
+
+    element.textContent = [
+      'O: ' + this.formatCurrency(candle.open),
+      'H: ' + this.formatCurrency(candle.high),
+      'L: ' + this.formatCurrency(candle.low),
+      'C: ' + this.formatCurrency(candle.close)
+    ].join('  |  ');
+  },
+
+  renderMarketTable(result) {
+    if (!this.elements.marketTable) return;
+
+    const coins = Array.isArray(result)
+      ? result
+      : result && Array.isArray(result.coins)
+        ? result.coins
+        : [];
+
+    if (!coins.length) return;
+
+    const fragment = document.createDocumentFragment();
+
+    coins.forEach((coin, index) => {
+      const row = document.createElement('tr');
+
+      const symbol = coin.symbol || '--';
+      const price = Number(coin.price);
+      const change = Number(coin.change24h);
+
+      const cells = [
+        String(index + 1),
+        symbol,
+        Number.isFinite(price)
+          ? this.formatCurrency(price)
+          : '--',
+        Number.isFinite(change)
+          ? change.toFixed(2) + '%'
+          : '--'
+      ];
+
+      cells.forEach(value => {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+
+      if (Number.isFinite(change)) {
+        row.lastElementChild.style.color =
+          change >= 0 ? '#00d69a' : '#ff526e';
+      }
+
+      row.dataset.symbol = symbol;
+      row.style.cursor = 'pointer';
+
+      fragment.appendChild(row);
+    });
+
+    this.elements.marketTable.replaceChildren(fragment);
+  },
+
+  filterCoins(query) {
+    const search = String(query || '').toLowerCase();
+
+    document.querySelectorAll(
+      '#market-table tr[data-symbol]'
+    ).forEach(row => {
+      const matches =
+        row.dataset.symbol.toLowerCase().includes(search);
+
+      row.style.display = matches ? '' : 'none';
+    });
+  },
+
+  toggleIndicator(name, button) {
+    if (!this.state.chart) return;
+
+    const allowed = [
+      'ema20',
+      'ema50',
+      'ema200',
+      'bollinger',
+      'volume',
+      'rsi',
+      'macd'
+    ];
+
+    if (!allowed.includes(name)) return;
+
+    const current =
+      this.state.chart.getChart().indicators[name];
+
+    this.state.chart.setIndicators({
+      [name]: !current
+    });
+
+    if (button) {
+      button.classList.toggle('active', !current);
+    }
+  },
+
+  updateLastUpdated() {
+    if (!this.elements.lastUpdated) return;
+
+    this.elements.lastUpdated.textContent =
+      this.state.lastUpdated.toLocaleTimeString();
+  },
+
+  setLoading(loading) {
+    if (!this.elements.loading) return;
+
+    this.elements.loading.style.display =
+      loading ? 'block' : 'none';
+  },
+
+  setText(element, value) {
+    if (!this.elements[element]) return;
+
+    this.elements[element].textContent = value;
+  },
+
+  formatCurrency(value) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: value < 1 ? 8 : 2
+    }).format(value);
+  },
+
+  notify(message, type = 'info') {
+    if (typeof window.showNotification === 'function') {
+      window.showNotification(message, type);
+      return;
+    }
+
+    console[type === 'error' ? 'error' : 'info'](message);
+  },
+
+  startAutoRefresh() {
+    this.stopAutoRefresh();
+
+    this.state.refreshTimer = setInterval(() => {
+      if (!document.hidden) {
+        this.refreshMarket();
+      }
+    }, this.config.refreshInterval);
+  },
+
+  stopAutoRefresh() {
+    if (this.state.refreshTimer) {
+      clearInterval(this.state.refreshTimer);
+      this.state.refreshTimer = null;
+    }
+  },
+
+  destroy() {
+    this.stopAutoRefresh();
+
+    if (this.state.chart) {
+      this.state.chart.destroy();
+      this.state.chart = null;
+    }
+
+    this.state.initialized = false;
   }
-}
 
-/* ---------------------------------------------------------
-   AUTOMATIC REFRESH
---------------------------------------------------------- */
+};
 
-function startAutoRefresh(seconds = 30) {
-  stopAutoRefresh();
-
-  Dashboard.refreshInterval = setInterval(
-    refreshDashboard,
-    seconds * 1000
-  );
-}
-
-function stopAutoRefresh() {
-  if (Dashboard.refreshInterval) {
-    clearInterval(Dashboard.refreshInterval);
-
-    Dashboard.refreshInterval = null;
-  }
-}
-
-/* ---------------------------------------------------------
-   MAIN INITIALIZATION
---------------------------------------------------------- */
-
-async function initializeDashboard() {
-  console.info(
-    'Initializing Crypto Intelligence Terminal...'
-  );
-
-  initializeCoinSearch();
-
-  initializeRangeButtons();
-
-  await loadMarketData();
-
-  const defaultCoin = Dashboard.coins.find(
-    coin => coin.symbol === 'BTC'
-  ) || Dashboard.coins[0];
-
-  if (defaultCoin) {
-    await selectCoin(defaultCoin.symbol);
-  }
-
-  startAutoRefresh(30);
-
-  console.info(
-    'Crypto Intelligence Terminal initialized.'
-  );
-}
-
-/* ---------------------------------------------------------
-   CLEANUP
---------------------------------------------------------- */
-
-window.addEventListener('beforeunload', () => {
-  stopAutoRefresh();
+document.addEventListener('DOMContentLoaded', () => {
+  CryptoDashboard.init();
 });
 
-/* ---------------------------------------------------------
-   PUBLIC API
---------------------------------------------------------- */
+window.CryptoDashboard = CryptoDashboard;
 
-window.CryptoDashboard = {
-  initializeDashboard,
-
-  loadMarketData,
-
-  refreshDashboard,
-
-  selectCoin,
-
-  selectHistoricalRange,
-
-  selectInterval,
-
-  updateTradingSignal,
-
-  renderTradingSignal,
-
-  renderCoinTable,
-
-  startAutoRefresh,
-
-  stopAutoRefresh,
-
-  getState() {
-    return {
-      selectedCoin: Dashboard.selectedCoin,
-
-      selectedRange: Dashboard.selectedRange,
-
-      selectedInterval: Dashboard.selectedInterval,
-
-      lastUpdated: Dashboard.lastUpdated
-    };
-  }
-};
-
-/* ---------------------------------------------------------
-   START APPLICATION
---------------------------------------------------------- */
-
-if (document.readyState === 'loading') {
-  document.addEventListener(
-    'DOMContentLoaded',
-    initializeDashboard
-  );
-} else {
-  initializeDashboard();
-}
-
-console.info(
-  'Crypto Intelligence Terminal dashboard controller loaded.'
-);
+console.info('Crypto Intelligence Terminal dashboard loaded.');
