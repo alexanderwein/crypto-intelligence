@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080d18">
+  <meta name="description" content="Crypto Intelligence Terminal - cryptocurrency market analysis and trading signals.">
+  <title>Crypto Intelligence Terminal</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/charts.css">
+  <link rel="stylesheet" href="css/responsive.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-icon">◈</span><div><strong>CRYPTO</strong><small>INTELLIGENCE TERMINAL</small></div></div>
+    <div class="nav-label">WORKSPACE</div>
+    <nav class="main-nav">
+      <a href="#overview" class="nav-item active">▦ <span>Overview</span></a>
+      <a href="#markets" class="nav-item">◉ <span>Markets</span></a>
+      <a href="#charts" class="nav-item">⌁ <span>Advanced Charts</span></a>
+      <a href="#scanner" class="nav-item">⌕ <span>Market Scanner</span></a>
+      <a href="#signals" class="nav-item">⚡ <span>Trading Signals</span></a>
+      <a href="#analysis" class="nav-item">◈ <span>Technical Analysis</span></a>
+    </nav>
+    <div class="nav-label">PERSONAL</div>
+    <nav class="main-nav">
+      <a href="#watchlist" class="nav-item">☆ <span>Watchlist</span></a>
+      <a href="#portfolio" class="nav-item">▤ <span>Portfolio</span></a>
+      <a href="#alerts" class="nav-item">♧ <span>Price Alerts</span></a>
+    </nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span> Market data connection <strong id="connection-status">Initializing</strong><small>Crypto Intelligence v1.0</small></div>
+  </aside>
+
+  <main class="main-content" id="overview">
+    <header class="topbar">
+      <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation">☰</button>
+      <div><div class="breadcrumb">WORKSPACE / <strong>OVERVIEW</strong></div><div class="page-heading">Market Intelligence</div></div>
+      <div class="topbar-right"><span class="live-indicator"><i></i> LIVE MARKET</span><span class="clock" id="market-clock">--:--:-- UTC</span></div>
+    </header>
+
+    <section class="market-strip" aria-label="Market summary">
+      <div class="market-stat"><span>GLOBAL MARKET CAP</span><strong id="global-market-cap">Loading...</strong><small id="market-cap-change">Aggregated data</small></div>
+      <div class="market-stat"><span>24H TRADING VOLUME</span><strong id="global-volume">Loading...</strong><small>24-hour volume</small></div>
+      <div class="market-stat"><span>BTC DOMINANCE</span><strong id="btc-dominance">Loading...</strong><small>Bitcoin market share</small></div>
+      <div class="market-stat"><span>ACTIVE COINS</span><strong>50</strong><small>Tracked assets</small></div>
+    </section>
+
+    <section class="section-block" id="markets">
+      <div class="section-heading"><div><h2>Market Overview</h2><p>Live cryptocurrency market monitoring</p></div><div class="section-actions"><span class="updated-label" id="last-updated">Waiting for data</span><button class="secondary-button" id="refresh-market">↻ Refresh</button></div></div>
+      <div class="coin-grid" id="coin-grid"><div class="loading-state">Connecting to market data...</div></div>
+    </section>
+
+    <section class="section-block chart-section" id="charts">
+      <div class="section-heading"><div><h2>Advanced Chart Analysis</h2><p>Interactive price action and technical indicators</p></div><div class="section-actions"><select id="selected-coin" aria-label="Select cryptocurrency"><option value="bitcoin">Bitcoin (BTC)</option></select><select id="chart-type" aria-label="Chart type"><option value="candlestick">Candlestick</option><option value="line">Line</option><option value="area">Area</option></select></div></div>
+      <div class="chart-toolbar"><div class="timeframe-controls" id="timeframe-controls"><button data-range="1" data-interval="1m">1m</button><button data-range="5" data-interval="5m">5m</button><button data-range="15" data-interval="15m">15m</button><button data-range="60" data-interval="1h">1H</button><button data-range="240" data-interval="4h">4H</button><button data-range="1440" data-interval="1d" class="active">1D</button><button data-range="10080" data-interval="1w">1W</button><button data-range="43200" data-interval="1M">1M</button></div><div class="chart-range"><button data-history="1D">1D</button><button data-history="1W">1W</button><button data-history="1M">1M</button><button data-history="3M">3M</button><button data-history="6M">6M</button><button data-history="1Y">1Y</button><button data-history="5Y">5Y</button><button data-history="MAX">MAX</button></div></div>
+      <div class="chart-price-info"><strong id="chart-coin-name">Bitcoin</strong><span id="chart-price">--</span><span id="chart-change">--</span><span class="chart-data-note">Historical market data</span></div>
+      <div id="main-chart" class="main-chart" aria-label="Interactive cryptocurrency price chart"></div>
+      <div class="indicator-toolbar"><span>INDICATORS</span><label><input type="checkbox" data-indicator="ema20"> EMA 20</label><label><input type="checkbox" data-indicator="ema50"> EMA 50</label><label><input type="checkbox" data-indicator="ema200"> EMA 200</label><label><input type="checkbox" data-indicator="bb"> Bollinger Bands</label><label><input type="checkbox" data-indicator="vwap"> VWAP</label></div>
+      <div class="subchart-grid"><div class="subchart-panel"><div class="panel-heading">RSI (14) <span id="rsi-value">--</span></div><div id="rsi-chart" class="sub-chart"></div></div><div class="subchart-panel"><div class="panel-heading">MACD (12, 26, 9)</div><div id="macd-chart" class="sub-chart"></div></div></div>
+      <div class="chart-crosshair-info" id="crosshair-info">Move your cursor over the chart to inspect candle data.</div>
+    </section>
+
+    <section class="section-block" id="signals">
+      <div class="section-heading"><div><h2>Trading Intelligence</h2><p>Technical signals based on available market indicators</p></div><span class="analysis-badge">ANALYTICAL ENGINE</span></div>
+      <div class="signal-layout"><div class="signal-main"><span class="muted-label">CURRENT TECHNICAL SIGNAL</span><div class="signal-result" id="signal-result">ANALYZING</div><div class="signal-score" id="signal-score">-- / 100</div><div class="score-track"><div id="signal-score-bar"></div></div><p id="signal-explanation">Awaiting sufficient market data to calculate technical indicators.</p></div><div class="signal-details" id="signal-details"><div><span>Trend</span><strong>Pending</strong></div><div><span>Momentum</span><strong>Pending</strong></div><div><span>Volatility</span><strong>Pending</strong></div><div><span>Volume</span><strong>Pending</strong></div><div><span>Risk assessment</span><strong>Pending</strong></div></div></div>
+    </section>
+
+    <section class="section-block" id="scanner">
+      <div class="section-heading"><div><h2>Top 50 Market Scanner</h2><p>Ranked cryptocurrency opportunities</p></div><input id="coin-search" class="search-input" type="search" placeholder="Search coins..."></div>
+      <div class="table-container"><table class="market-table"><thead><tr><th>#</th><th>ASSET</th><th>PRICE</th><th>24H CHANGE</th><th>MARKET CAP</th><th>VOLUME</th><th>TECHNICAL SIGNAL</th></tr></thead><tbody id="market-table-body"><tr><td colspan="7" class="loading-state">Loading market data...</td></tr></tbody></table></div>
+    </section>
+
+    <section class="section-block" id="analysis"><div class="section-heading"><div><h2>Technical Analysis</h2><p>Indicator readings for the selected asset</p></div></div><div class="analysis-grid" id="analysis-grid"><div class="analysis-card"><span>RSI</span><strong>--</strong><small>Relative strength</small></div><div class="analysis-card"><span>MACD</span><strong>--</strong><small>Trend momentum</small></div><div class="analysis-card"><span>ADX</span><strong>--</strong><small>Trend strength</small></div><div class="analysis-card"><span>ATR</span><strong>--</strong><small>Volatility</small></div></div></section>
+
+    <footer class="footer"><span>CRYPTO INTELLIGENCE TERMINAL © 2026</span><span>Market analysis and educational signals only. Not financial advice.</span></footer>
+  </main>
+</div>
+<script src="js/config.js"></script>
+<script src="js/api/market-data.js"></script>
+<script src="js/api/historical-data.js"></script>
+<script src="js/api/websocket.js"></script>
+<script src="js/indicators/trend.js"></script>
+<script src="js/indicators/momentum.js"></script>
+<script src="js/indicators/volatility.js"></script>
+<script src="js/indicators/volume.js"></script>
+<script src="js/indicators/patterns.js"></script>
+<script src="js/charts/chart-engine.js"></script>
+<script src="js/charts/crosshair.js"></script>
+<script src="js/charts/indicators-overlay.js"></script>
+<script src="js/analysis/trend-engine.js"></script>
+<script src="js/analysis/forecast-engine.js"></script>
+<script src="js/analysis/signal-engine.js"></script>
+<script src="js/analysis/support-resistance.js"></script>
+<script src="js/analysis/risk-engine.js"></script>
+<script src="js/scanner/coin-ranking.js"></script>
+<script src="js/scanner/market-scanner.js"></script>
+<script src="js/components/coin-table.js"></script>
+<script src="js/components/watchlist.js"></script>
+<script src="js/components/signal-panel.js"></script>
+<script src="js/components/market-overview.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
